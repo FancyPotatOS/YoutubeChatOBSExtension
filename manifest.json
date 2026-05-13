@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "YT Chat OBS Extension",
+  "version": "1.0",
+  "description": "Manually prepares YouTube Chat for OBS capture.",
+  "permissions": ["scripting", "activeTab"],
+  "action": {
+    "default_title": "Enable YT Chat OBS Mode"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icon_16.png",
+    "32": "icon_32.png",
+    "64": "icon_64.png",
+    "128": "icon_128.png"
+  }
+}

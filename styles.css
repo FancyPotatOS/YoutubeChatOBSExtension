@@ -1,0 +1,71 @@
+
+#chat-messages>yt-live-chat-header-renderer {
+    display: none;
+}
+
+#panel-pages {
+    display: none;
+}
+
+yt-live-chat-viewer-engagement-message-renderer.style-scope.yt-live-chat-item-list-renderer {
+    display: none;
+}
+
+#item-scroller {
+    -ms-overflow-style: none;  /* Internet Explorer 10+ */
+    scrollbar-width: none;  /* Firefox, Safari 18.2+, Chromium 121+ */
+}
+#item-scroller::-webkit-scrollbar { 
+    display: none;  /* Older Safari and Chromium */
+}
+
+#contents.style-scope.yt-live-chat-renderer {
+    scale: 2;
+    left: 814px;
+    bottom: -393px;
+}
+
+#chat {
+    --chat-height: 400px;
+    width: 400px;
+    height: var(--chat-height);
+    min-height: var(--chat-height);
+    max-height: var(--chat-height);
+}
+
+yt-live-chat-text-message-renderer {
+    background: #00FF00 !important;
+}
+
+/* Remove YouTube text shadows / transparency */
+#message,
+#author-name,
+#timestamp,
+yt-formatted-string,
+span {
+    text-shadow: none !important;
+    opacity: 1 !important;
+}
+
+/* Force readable solid text */
+#message {
+    color: white !important;
+    font-weight: 700 !important;
+}
+
+#author-name {
+    color: white !important;
+    font-weight: 800 !important;
+}
+
+#timestamp {
+    color: white !important;
+    opacity: 1 !important;
+}
+
+/* Optional: add a black outline instead of transparent shadow */
+#message,
+#author-name {
+    -webkit-text-stroke: 0.6px black;
+    paint-order: stroke fill;
+}
