@@ -36,6 +36,9 @@ yt-live-chat-viewer-engagement-message-renderer.style-scope.yt-live-chat-item-li
 yt-live-chat-text-message-renderer {
     background: #00FF00 !important;
 }
+#contents {
+    background: #00FF00 !important;
+}
 
 /* Remove YouTube text shadows / transparency */
 #message,
