@@ -19,8 +19,12 @@
     background-color: #2669d7 !important;
 }
 
-
 yt-live-chat-viewer-engagement-message-renderer.style-scope.yt-live-chat-item-list-renderer {
+    display: none;
+}
+
+/* Hide deleted messages */
+yt-live-chat-text-message-renderer:has(div#content):has(span#deleted-state:not(:empty)) {
     display: none;
 }
 
