@@ -1,5 +1,6 @@
 """Command handlers used by youtube_chat_watcher.py."""
 
+import stream_inventory
 import youtube_api
 
 
@@ -131,6 +132,9 @@ def youtube_purge_commands_command(data, browser=None):
 
 
 STREAM_COMMANDS = {
+    "!auction": stream_inventory.auction_item,
     "!clear": clear_command,
+    "!register": stream_inventory.register_user,
+    "!sell": stream_inventory.sell_item,
     "!ytpurge": youtube_purge_commands_command,
 }

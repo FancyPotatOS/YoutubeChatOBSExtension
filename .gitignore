@@ -2,3 +2,5 @@ __pycache__/
 *.py[cod]
 client_secret*.json
 youtube_oauth_token.json
+secrets.json
+script.sql
