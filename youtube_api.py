@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from datetime import datetime
 import hashlib
 import http.server
 import json
@@ -210,13 +211,44 @@ def extract_video_id_from_url(url: str) -> str | None:
     return None
 
 
-def extract_live_chat_message_id(chat_item: dict) -> str | None:
-    message_id = str(chat_item.get("id") or "").strip()
-    for prefix in ("message-", "chat-message-"):
-        if message_id.startswith(prefix):
-            message_id = message_id[len(prefix) :]
+def live_chat_item_text(item: dict) -> str:
+    snippet = item.get("snippet") or {}
+    text_details = snippet.get("textMessageDetails") or {}
+    return str(
+        text_details.get("messageText")
+        or snippet.get("displayMessage")
+        or ""
+    )
 
-    return message_id or None
+
+def live_chat_item_author(item: dict) -> str:
+    author = item.get("authorDetails") or {}
+    return str(author.get("displayName") or "")
+
+
+def live_chat_item_published_at(item: dict) -> datetime | None:
+    published_at = str((item.get("snippet") or {}).get("publishedAt") or "")
+    if not published_at:
+        return None
+
+    try:
+        return datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def parse_youtube_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def normalize_live_chat_text(value: str) -> str:
+    return " ".join(value.split())
 
 
 class YouTubeApi:
@@ -360,8 +392,131 @@ class YouTubeApi:
         live_chat_id = self.get_live_chat_id_for_video(video_id)
         return self.send_live_chat_message(live_chat_id, text)
 
+    def list_live_chat_messages(
+        self,
+        live_chat_id: str,
+        *,
+        page_token: str | None = None,
+        max_results: int = 500,
+    ) -> dict:
+        max_results = min(max(max_results, 200), 2000)
+        params = {
+            "liveChatId": live_chat_id,
+            "part": "id,snippet,authorDetails",
+            "maxResults": str(max_results),
+        }
+        if page_token:
+            params["pageToken"] = page_token
+
+        return self.request("GET", "/liveChat/messages", params=params) or {}
+
     def delete_live_chat_message(self, message_id: str) -> None:
         self.request("DELETE", "/liveChat/messages", params={"id": message_id})
+
+    def find_recent_message(
+        self,
+        live_chat_id: str,
+        *,
+        text: str,
+        author: str | None = None,
+        received_at: str | None = None,
+        max_results: int = 500,
+    ) -> dict | None:
+        target_text = normalize_live_chat_text(text)
+        target_author = normalize_live_chat_text(author or "")
+        target_time = parse_youtube_datetime(received_at)
+        response = self.list_live_chat_messages(live_chat_id, max_results=max_results)
+        matches = []
+
+        for index, item in enumerate(response.get("items") or []):
+            item_text = normalize_live_chat_text(live_chat_item_text(item))
+            if item_text != target_text:
+                continue
+
+            item_author = normalize_live_chat_text(live_chat_item_author(item))
+            if target_author and item_author != target_author:
+                continue
+
+            item_time = live_chat_item_published_at(item)
+            if target_time and item_time:
+                distance = abs((item_time - target_time).total_seconds())
+            else:
+                distance = 0
+
+            matches.append((distance, index, item))
+
+        if not matches:
+            return None
+
+        if target_time:
+            return min(matches, key=lambda match: (match[0], -match[1]))[2]
+        return matches[-1][2]
+
+    def delete_recent_message(
+        self,
+        live_chat_id: str,
+        *,
+        text: str,
+        author: str | None = None,
+        received_at: str | None = None,
+        max_results: int = 500,
+    ) -> dict | None:
+        message = self.find_recent_message(
+            live_chat_id,
+            text=text,
+            author=author,
+            received_at=received_at,
+            max_results=max_results,
+        )
+        if not message:
+            return None
+
+        self.delete_live_chat_message(str(message.get("id") or ""))
+        return message
+
+    def delete_recent_messages_by_prefix(
+        self,
+        live_chat_id: str,
+        *,
+        prefix: str = "!",
+        max_results: int = 500,
+        dry_run: bool = False,
+    ) -> dict:
+        response = self.list_live_chat_messages(live_chat_id, max_results=max_results)
+        result = {
+            "liveChatId": live_chat_id,
+            "prefix": prefix,
+            "dryRun": dry_run,
+            "scanned": len(response.get("items") or []),
+            "matched": 0,
+            "matchedItems": [],
+            "deleted": [],
+            "failed": [],
+        }
+
+        for item in response.get("items") or []:
+            text = live_chat_item_text(item)
+            if not text.lstrip().startswith(prefix):
+                continue
+
+            result["matched"] += 1
+            entry = {
+                "id": item.get("id") or "",
+                "author": live_chat_item_author(item),
+                "text": text,
+            }
+            if dry_run:
+                result["matchedItems"].append(entry)
+                continue
+
+            try:
+                self.delete_live_chat_message(str(item.get("id") or ""))
+                result["deleted"].append(entry)
+            except YouTubeApiError as error:
+                entry["error"] = str(error)
+                result["failed"].append(entry)
+
+        return result
 
     def _load_token(self) -> dict:
         try:
@@ -395,8 +550,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
     send.add_argument("--video-id", required=True)
     send.add_argument("--text", required=True)
 
+    list_messages = subparsers.add_parser(
+        "list",
+        help="List recent live chat messages with their API message IDs.",
+    )
+    list_messages.add_argument("--video-id", required=True)
+    list_messages.add_argument("--max-results", type=int, default=500)
+
     delete = subparsers.add_parser("delete", help="Delete a live chat message by ID.")
     delete.add_argument("--message-id", required=True)
+
+    purge_prefix = subparsers.add_parser(
+        "purge-prefix",
+        help="Delete recent live chat messages whose API text starts with a prefix.",
+    )
+    purge_prefix.add_argument("--video-id", required=True)
+    purge_prefix.add_argument("--prefix", default="!")
+    purge_prefix.add_argument("--max-results", type=int, default=500)
+    purge_prefix.add_argument("--dry-run", action="store_true")
     return parser
 
 
@@ -413,9 +584,29 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "send":
             result = api.send_live_chat_message_for_video(args.video_id, args.text)
             print(json.dumps(result, indent=2), flush=True)
+        elif args.command == "list":
+            live_chat_id = api.get_live_chat_id_for_video(args.video_id)
+            result = api.list_live_chat_messages(
+                live_chat_id,
+                max_results=args.max_results,
+            )
+            for item in result.get("items") or []:
+                message_id = item.get("id") or ""
+                author = live_chat_item_author(item)
+                text = live_chat_item_text(item)
+                print(f"{message_id}\t{author}\t{text}", flush=True)
         elif args.command == "delete":
             api.delete_live_chat_message(args.message_id)
             print("Deleted.", flush=True)
+        elif args.command == "purge-prefix":
+            live_chat_id = api.get_live_chat_id_for_video(args.video_id)
+            result = api.delete_recent_messages_by_prefix(
+                live_chat_id,
+                prefix=args.prefix,
+                max_results=args.max_results,
+                dry_run=args.dry_run,
+            )
+            print(json.dumps(result, indent=2), flush=True)
         else:
             raise AssertionError(f"Unhandled command: {args.command}")
     except (YouTubeAuthError, YouTubeApiError) as error:

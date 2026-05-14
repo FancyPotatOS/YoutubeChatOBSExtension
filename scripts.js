@@ -56,6 +56,7 @@
   const readChatItem = (item) => ({
     type: getChatItemType(item),
     watcherId: getWatcherId(item),
+    htmlId: item.id || "",
     id: item.id || "",
     authorName: getText(item, "#author-name"),
     owner: item.getElementsByClassName("owner").length > 0,

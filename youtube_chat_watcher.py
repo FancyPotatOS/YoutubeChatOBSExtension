@@ -84,6 +84,7 @@ WATCHER_JS = r"""
   const readChatItem = (item) => ({
     type: getChatItemType(item),
     watcherId: getWatcherId(item),
+    htmlId: item.id || "",
     id: item.id || "",
     authorName: getText(item, "#author-name"),
     owner: item.getElementsByClassName("owner").length > 0,
@@ -641,12 +642,22 @@ def handle_chat_item(chat_item: dict, browser: BrowserTab | None = None) -> None
         command_name = message.split(maxsplit=1)[0]
         command = stream_commands.STREAM_COMMANDS.get(command_name)
         if command is None:
+            run_stream_command(stream_commands.delete_command, chat_item, browser)
             print(f"[{timestamp}] {author}: unknown command {command_name}", flush=True)
             return
         try:
             run_stream_command(command, chat_item, browser)
         except Exception as error:
             print(f"[{timestamp}] {author}: command {command_name} failed: {error}", file=sys.stderr, flush=True)
+        finally:
+            try:
+                stream_commands.delete_command(chat_item, browser=browser)
+            except Exception as error:
+                print(
+                    f"[{timestamp}] {author}: command cleanup failed: {error}",
+                    file=sys.stderr,
+                    flush=True,
+                )
     else:
         print(f"[{timestamp}] {author}: {message}", flush=True)
 

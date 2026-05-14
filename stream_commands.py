@@ -2,14 +2,51 @@
 
 import youtube_api
 
+
+_LIVE_CHAT_ID_BY_VIDEO_ID = {}
+
+
 def require_owner(data):
     return data.get("owner", False)
 
 
-def test_command(data, browser=None):
-    if not require_owner(data):
-        return
-    print(data)
+def delete_command(data, browser=None):
+    """Delete the command message itself by matching it through the API."""
+    if browser is None:
+        return False
+
+    message = data.get("message") or data.get("rawText") or ""
+    if not message.startswith("!"):
+        return False
+
+    api = youtube_api.YouTubeApi()
+    live_chat_id = get_current_live_chat_id(api, browser)
+    if not live_chat_id:
+        return False
+
+    try:
+        deleted = api.delete_recent_message(
+            live_chat_id,
+            text=message,
+            author=data.get("authorName"),
+            received_at=data.get("receivedAt"),
+        )
+    except (youtube_api.YouTubeAuthError, youtube_api.YouTubeApiError) as error:
+        print(f"Could not delete command natively: {error}")
+        if browser.hide_chat_item(data):
+            print("Command message was hidden locally instead")
+        return False
+
+    if deleted:
+        print(
+            "Deleted command message natively: "
+            f"{deleted.get('id')} from {youtube_api.live_chat_item_author(deleted)}"
+        )
+        return True
+
+    if browser.hide_chat_item(data):
+        print("Could not match the command in the API list, so it was hidden locally")
+    return False
 
 
 def clear_command(data, browser=None):
@@ -41,67 +78,59 @@ def get_current_video_id(browser):
     return youtube_api.extract_video_id_from_url(str(current_url or ""))
 
 
-def youtube_api_demo_command(data, browser=None):
-    """Post a message through the YouTube API and try a native delete."""
+def get_current_live_chat_id(api, browser):
+    video_id = get_current_video_id(browser)
+    if not video_id:
+        return None
+
+    if video_id not in _LIVE_CHAT_ID_BY_VIDEO_ID:
+        _LIVE_CHAT_ID_BY_VIDEO_ID[video_id] = api.get_live_chat_id_for_video(video_id)
+    return _LIVE_CHAT_ID_BY_VIDEO_ID[video_id]
+
+
+def print_purge_result(result):
+    deleted = len(result.get("deleted") or [])
+    failed = len(result.get("failed") or [])
+    scanned = result.get("scanned", 0)
+    matched = result.get("matched", 0)
+    prefix = result.get("prefix", "!")
+    print("Deleted API message IDs:")
+    for item in result.get("deleted") or []:
+        print(
+            f"- {item.get('id')} from {item.get('author') or '(unknown)'}: "
+            f"{item.get('text')}"
+        )
+    print(
+        f"Scanned {scanned} API messages; matched {matched} starting with "
+        f"{prefix!r}; deleted {deleted}; failed {failed}"
+    )
+    for item in result.get("failed") or []:
+        print(
+            f"Could not delete {item.get('id')} from "
+            f"{item.get('author') or '(unknown)'}: {item.get('error')}"
+        )
+
+
+def youtube_purge_commands_command(data, browser=None):
+    """Delete recent live chat messages whose API text starts with a prefix."""
     if not require_owner(data):
         return
     if browser is None:
-        print("Cannot run YouTube API demo because no browser tab is attached")
+        print("Cannot purge YouTube messages because no browser tab is attached")
         return
 
-    video_id = get_current_video_id(browser)
-    if not video_id:
-        print("Could not find a YouTube video ID from the chat tab URL")
-        return
-
-    text = command_text_after(data, "!ytapi")
-    if not text:
-        text = "Native YouTube API demo from the OBS chat bot."
-
+    prefix = command_text_after(data, "!ytpurge") or "!"
     api = youtube_api.YouTubeApi()
-    sent_message = api.send_live_chat_message_for_video(video_id, text)
-    sent_id = sent_message.get("id") or "(no id returned)"
-    print(f"Sent native YouTube chat message: {sent_id}")
-
-    command_message_id = youtube_api.extract_live_chat_message_id(data)
-    if not command_message_id:
-        if browser.hide_chat_item(data):
-            print("No API message ID was found, so the command was hidden locally")
+    live_chat_id = get_current_live_chat_id(api, browser)
+    if not live_chat_id:
+        print("Could not find a YouTube live chat ID from the chat tab URL")
         return
 
-    try:
-        api.delete_live_chat_message(command_message_id)
-        print(f"Deleted command message natively: {command_message_id}")
-    except youtube_api.YouTubeApiError as error:
-        print(f"Native delete failed for {command_message_id}: {error}")
-        if browser.hide_chat_item(data):
-            print("Command message was hidden locally instead")
-
-
-def youtube_hide_command(data, browser=None):
-    """Delete a live chat message by API ID.
-
-    Usage in chat: !ythide MESSAGE_ID
-    If no ID is supplied, this tries to delete the command message itself.
-    """
-    if not require_owner(data):
-        return
-
-    message_id = command_text_after(data, "!ythide")
-    if not message_id:
-        message_id = youtube_api.extract_live_chat_message_id(data)
-    if not message_id:
-        print("Usage: !ythide LIVE_CHAT_MESSAGE_ID")
-        return
-
-    api = youtube_api.YouTubeApi()
-    api.delete_live_chat_message(message_id)
-    print(f"Deleted live chat message natively: {message_id}")
+    result = api.delete_recent_messages_by_prefix(live_chat_id, prefix=prefix)
+    print_purge_result(result)
 
 
 STREAM_COMMANDS = {
-    "!test": test_command,
     "!clear": clear_command,
-    "!ytapi": youtube_api_demo_command,
-    "!ythide": youtube_hide_command,
+    "!ytpurge": youtube_purge_commands_command,
 }

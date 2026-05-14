@@ -39,6 +39,7 @@ Clicking the extension now also starts a `MutationObserver` in the chat tab. Eac
 {
   type,
   watcherId,
+  htmlId,
   id,
   authorName,
   authorPhotoUrl,
@@ -48,6 +49,8 @@ Clicking the extension now also starts a `MutationObserver` in the chat tab. Eac
   receivedAt
 }
 ```
+
+`htmlId` and the legacy `id` field are browser DOM IDs, not YouTube API message IDs.
 
 Edit `performAction` in `scripts.js` to run browser-side bot behavior for each new item. The current default dispatches a `yt-chat-obs:new-item` browser event and hides command messages that start with `!`.
 
@@ -95,6 +98,8 @@ Use `--retry-interval 2` to change the reconnect delay.
 
 The Python watcher can also call the YouTube Data API for native live chat actions.
 YouTube's live chat API supports public message insert and message deletion; it does not expose a Twitch-style private whisper endpoint.
+The `id` captured from the chat page DOM is not the same value as the YouTube API message ID.
+Native moderation needs message IDs returned by `liveChatMessages.list` or `liveChatMessages.insert`.
 
 1. In Google Cloud, enable **YouTube Data API v3** for your project.
 2. Create an OAuth client with the **Desktop app** application type.
@@ -116,13 +121,22 @@ python .\youtube_chat_watcher.py
 
 Owner-only demo commands:
 
-- `!ytapi optional message text` posts a public message to the current live chat through `liveChatMessages.insert`, then attempts to delete the command message through `liveChatMessages.delete`. If YouTube does not provide or accept the command message ID, the watcher hides the command locally as a fallback.
-- `!ythide LIVE_CHAT_MESSAGE_ID` deletes a specific live chat message through `liveChatMessages.delete`.
+- `!ytapi optional message text` posts a public message to the current live chat through `liveChatMessages.insert`, then lists recent API chat messages and deletes messages whose API text starts with `!`.
+- `!ytpurge` lists recent API chat messages and deletes messages whose API text starts with `!`.
+- `!ytpurge ?` deletes recent API chat messages whose text starts with `?` instead.
+- `!ythide LIVE_CHAT_MESSAGE_ID` deletes a specific live chat message through `liveChatMessages.delete`. This must be the API message ID, not the HTML element ID.
+
+Every recognized Python command also calls `delete_command` afterward. That cleanup lists recent API chat messages, matches the exact command text and author, and deletes the matching YouTube API message ID. If the API message cannot be matched or deleted, the watcher hides that command locally in the attached chat tab as a fallback.
 
 You can also test the API helper from PowerShell:
 
 ```powershell
 python .\youtube_api.py chat-id --video-id VIDEO_CODE
 python .\youtube_api.py send --video-id VIDEO_CODE --text "API test from local bot"
+python .\youtube_api.py list --video-id VIDEO_CODE
+python .\youtube_api.py purge-prefix --video-id VIDEO_CODE --prefix "!" --dry-run
+python .\youtube_api.py purge-prefix --video-id VIDEO_CODE --prefix "!"
 python .\youtube_api.py delete --message-id LIVE_CHAT_MESSAGE_ID
 ```
+
+`liveChatMessages.list` only returns recent messages from YouTube's API history window; it cannot recover older messages beyond the initial API response. A native delete also requires that the OAuth account is the channel owner or a moderator, and YouTube may reject deletion of protected messages.
