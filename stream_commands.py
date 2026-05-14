@@ -3,7 +3,7 @@
 
 
 def test_command(data, browser=None):
-    browser.evaluate(f"""console.log("{data.get('authorName') or '(unknown)'} sent the !test command")""")
+    browser.evaluate(f"""console.log("{data.get('authorName') or '(unknown)'} sent the !test command. isOwner: {data.get('owner', False)}")""")
 
 
 def clear_command(data, browser=None):

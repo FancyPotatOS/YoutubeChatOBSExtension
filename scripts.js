@@ -58,6 +58,7 @@
     watcherId: getWatcherId(item),
     id: item.id || "",
     authorName: getText(item, "#author-name"),
+    owner: item.getElementsByClassName("owner").length > 0,
     authorPhotoUrl: getImageUrl(item),
     message: getText(item, "#message"),
     timestamp: getText(item, "#timestamp"),
