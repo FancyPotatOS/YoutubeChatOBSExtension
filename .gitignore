@@ -1,1 +1,4 @@
-__pycache__/stream_commands.cpython-314.pyc
+__pycache__/
+*.py[cod]
+client_secret*.json
+youtube_oauth_token.json

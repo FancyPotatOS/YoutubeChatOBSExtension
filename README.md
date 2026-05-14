@@ -90,3 +90,39 @@ Available browser helper methods:
 
 The Python watcher can be started before Chrome is open. It waits for the DevTools port and live chat tab, and reconnects if Chrome or the tab is closed.
 Use `--retry-interval 2` to change the reconnect delay.
+
+## Native YouTube API demo commands
+
+The Python watcher can also call the YouTube Data API for native live chat actions.
+YouTube's live chat API supports public message insert and message deletion; it does not expose a Twitch-style private whisper endpoint.
+
+1. In Google Cloud, enable **YouTube Data API v3** for your project.
+2. Create an OAuth client with the **Desktop app** application type.
+3. Download the OAuth JSON file and save it in this folder as `client_secret.json`.
+4. Run the OAuth setup once:
+
+```powershell
+python .\youtube_api.py auth
+```
+
+This opens Google's consent screen, asks for the `https://www.googleapis.com/auth/youtube.force-ssl` scope, and saves a local `youtube_oauth_token.json`.
+Both `client_secret*.json` and `youtube_oauth_token.json` are ignored by git.
+
+After that, start the watcher as usual:
+
+```powershell
+python .\youtube_chat_watcher.py
+```
+
+Owner-only demo commands:
+
+- `!ytapi optional message text` posts a public message to the current live chat through `liveChatMessages.insert`, then attempts to delete the command message through `liveChatMessages.delete`. If YouTube does not provide or accept the command message ID, the watcher hides the command locally as a fallback.
+- `!ythide LIVE_CHAT_MESSAGE_ID` deletes a specific live chat message through `liveChatMessages.delete`.
+
+You can also test the API helper from PowerShell:
+
+```powershell
+python .\youtube_api.py chat-id --video-id VIDEO_CODE
+python .\youtube_api.py send --video-id VIDEO_CODE --text "API test from local bot"
+python .\youtube_api.py delete --message-id LIVE_CHAT_MESSAGE_ID
+```
