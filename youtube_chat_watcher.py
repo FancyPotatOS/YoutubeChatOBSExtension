@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import base64
+from collections.abc import Callable
+import inspect
 import json
 import os
 import socket
@@ -43,8 +45,10 @@ WATCHER_JS = r"""
     window.__ytChatPythonWatcher.observer.disconnect();
   }
 
+  const instanceId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   const state = {
     observer: null,
+    nextItemId: 1,
     seenItems: new WeakSet()
   };
   window.__ytChatPythonWatcher = state;
@@ -68,8 +72,18 @@ WATCHER_JS = r"""
       .replace("-renderer", "")
   );
 
+  const getWatcherId = (item) => {
+    if (!item.dataset.ytChatPythonWatcherId) {
+      item.dataset.ytChatPythonWatcherId = `${instanceId}-${state.nextItemId}`;
+      state.nextItemId += 1;
+    }
+
+    return item.dataset.ytChatPythonWatcherId;
+  };
+
   const readChatItem = (item) => ({
     type: getChatItemType(item),
+    watcherId: getWatcherId(item),
     id: item.id || "",
     authorName: getText(item, "#author-name"),
     authorPhotoUrl: getImageUrl(item),
@@ -299,6 +313,7 @@ class DevToolsClient:
     def __init__(self, websocket: DevToolsWebSocket) -> None:
         self.websocket = websocket
         self.next_message_id = 1
+        self.event_handler: Callable[[dict], None] | None = None
 
     def call(self, method: str, params: dict | None = None) -> dict:
         message_id = self.next_message_id
@@ -318,11 +333,120 @@ class DevToolsClient:
                     raise RuntimeError(message["error"])
                 return message.get("result", {})
 
-            handle_event(message)
+            if self.event_handler is not None:
+                self.event_handler(message)
 
     def events(self):  # type: ignore[no-untyped-def]
         while True:
             yield json.loads(self.websocket.recv_text())
+
+
+class BrowserTab:
+    """Small helper for command handlers that need to touch the attached tab."""
+
+    def __init__(self, client: DevToolsClient) -> None:
+        self.client = client
+
+    def evaluate(self, expression: str, *, await_promise: bool = True):  # type: ignore[no-untyped-def]
+        result = self.client.call(
+            "Runtime.evaluate",
+            {
+                "expression": expression,
+                "awaitPromise": await_promise,
+                "returnByValue": True,
+            },
+        )
+        if "exceptionDetails" in result:
+            details = result["exceptionDetails"]
+            exception = details.get("exception", {})
+            raise RuntimeError(exception.get("description") or details.get("text") or "JavaScript failed")
+
+        remote_object = result.get("result", {})
+        if "value" in remote_object:
+            return remote_object["value"]
+        if remote_object.get("type") == "undefined":
+            return None
+        return remote_object.get("description")
+
+    def click(self, selector: str) -> bool:
+        selector_json = json.dumps(selector)
+        return bool(
+            self.evaluate(
+                f"""
+(() => {{
+  const element = document.querySelector({selector_json});
+  if (!element) {{
+    return false;
+  }}
+  element.click();
+  return true;
+}})()
+"""
+            )
+        )
+
+    def set_text(self, selector: str, text: str) -> bool:
+        selector_json = json.dumps(selector)
+        text_json = json.dumps(text)
+        return bool(
+            self.evaluate(
+                f"""
+(() => {{
+  document.querySelectorAll({selector_json}).forEach(element => {{
+    if (!element) {{
+        return false;
+    }}
+
+    const text = {text_json};
+    element.focus?.();
+    if ("value" in element) {{
+        element.value = text;
+    }} else {{
+        element.textContent = text;
+    }}
+    element.dispatchEvent(new Event("input", {{ bubbles: true }}));
+    element.dispatchEvent(new Event("change", {{ bubbles: true }}));
+    return true;
+  }});
+}})()
+"""
+            )
+        )
+
+    def get_text(self, selector: str) -> str:
+        selector_json = json.dumps(selector)
+        value = self.evaluate(
+            f"""
+(() => {{
+  const element = document.querySelector({selector_json});
+  return element ? (element.innerText || element.textContent || "") : "";
+}})()
+"""
+        )
+        return str(value or "")
+
+    def hide_chat_item(self, chat_item: dict) -> bool:
+        watcher_id = chat_item.get("watcherId")
+        if not watcher_id:
+            return False
+
+        watcher_id_json = json.dumps(str(watcher_id))
+        return bool(
+            self.evaluate(
+                f"""
+(() => {{
+  const watcherId = {watcher_id_json};
+  const items = Array.from(document.querySelectorAll("[data-yt-chat-python-watcher-id]"));
+  const element = items.find((item) => item.dataset.ytChatPythonWatcherId === watcherId);
+  if (!element) {{
+    return false;
+  }}
+  element.style.display = "none";
+  return true;
+}})()
+"""
+            )
+        )
 
 
 def fetch_tabs(host: str, port: int) -> list[dict]:
@@ -349,7 +473,8 @@ def choose_tab(tabs: list[dict], url_contains: str) -> dict:
         f"Visible DevTools tabs:\n{open_tabs}"
     )
 
-def handle_event(message: dict) -> None:
+
+def handle_event(message: dict, browser: BrowserTab | None = None) -> None:
     if message.get("method") != "Runtime.bindingCalled":
         return
 
@@ -363,7 +488,7 @@ def handle_event(message: dict) -> None:
         print(f"Received non-JSON chat payload: {params.get('payload')!r}", file=sys.stderr)
         return
 
-    handle_chat_item(chat_item)
+    handle_chat_item(chat_item, browser)
 
 
 def install_browser_binding(client: DevToolsClient) -> None:
@@ -434,11 +559,13 @@ def watch_once(args: argparse.Namespace) -> None:
 
     with DevToolsWebSocket(websocket_url) as websocket:
         client = DevToolsClient(websocket)
+        browser = BrowserTab(client)
+        client.event_handler = lambda event: handle_event(event, browser)
         client.call("Runtime.enable")
         install_browser_binding(client)
         watcher_js = WATCHER_JS.replace(
             "__INCLUDE_EXISTING_ON_START__",
-            "true"# if args.include_existing else "false",
+            "true" if args.include_existing else "false",
         )
         result = client.call("Runtime.evaluate", {"expression": watcher_js, "awaitPromise": True})
         install_result = result.get("result", {}).get("value")
@@ -446,7 +573,7 @@ def watch_once(args: argparse.Namespace) -> None:
 
         try:
             for event in client.events():
-                handle_event(event)
+                handle_event(event, browser)
         finally:
             uninstall_browser_watcher(client)
 
@@ -484,7 +611,26 @@ def main() -> int:
     return 0
 
 
-def handle_chat_item(chat_item: dict) -> None:
+def command_accepts_browser(command: Callable) -> bool:
+    try:
+        parameters = inspect.signature(command).parameters
+    except (TypeError, ValueError):
+        return False
+
+    return "browser" in parameters or any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+
+
+def run_stream_command(command: Callable, chat_item: dict, browser: BrowserTab | None) -> None:
+    if command_accepts_browser(command):
+        command(chat_item, browser=browser)
+    else:
+        command(chat_item)
+
+
+def handle_chat_item(chat_item: dict, browser: BrowserTab | None = None) -> None:
     """Do your bot work here for each new chat item."""
     author = chat_item.get("authorName") or "(unknown)"
     message = chat_item.get("message") or chat_item.get("rawText") or ""
@@ -496,7 +642,10 @@ def handle_chat_item(chat_item: dict) -> None:
         if command is None:
             print(f"[{timestamp}] {author}: unknown command {command_name}", flush=True)
             return
-        command(chat_item)
+        try:
+            run_stream_command(command, chat_item, browser)
+        except Exception as error:
+            print(f"[{timestamp}] {author}: command {command_name} failed: {error}", file=sys.stderr, flush=True)
     else:
         print(f"[{timestamp}] {author}: {message}", flush=True)
 

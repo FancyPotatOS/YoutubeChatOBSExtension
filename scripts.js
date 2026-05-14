@@ -7,7 +7,7 @@
     "yt-live-chat-membership-item-renderer"
   ];
   const CHAT_ITEM_SELECTOR = CHAT_ITEM_SELECTORS.join(",");
-  const PROCESS_EXISTING_ON_START = true;
+  const PROCESS_EXISTING_ON_START = false;
 
   console.log("YT Chat OBS Mode enabled");
   document.documentElement.dataset.obsMode = "true";
@@ -17,8 +17,10 @@
     return;
   }
 
+  const instanceId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   const state = {
     observer: null,
+    nextItemId: 1,
     seenItems: new WeakSet()
   };
   globalThis[WATCHER_KEY] = state;
@@ -42,8 +44,18 @@
       .replace("-renderer", "")
   );
 
+  const getWatcherId = (item) => {
+    if (!item.dataset.ytChatObsWatcherId) {
+      item.dataset.ytChatObsWatcherId = `${instanceId}-${state.nextItemId}`;
+      state.nextItemId += 1;
+    }
+
+    return item.dataset.ytChatObsWatcherId;
+  };
+
   const readChatItem = (item) => ({
     type: getChatItemType(item),
+    watcherId: getWatcherId(item),
     id: item.id || "",
     authorName: getText(item, "#author-name"),
     authorPhotoUrl: getImageUrl(item),

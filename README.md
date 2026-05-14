@@ -38,6 +38,7 @@ Clicking the extension now also starts a `MutationObserver` in the chat tab. Eac
 ```js
 {
   type,
+  watcherId,
   id,
   authorName,
   authorPhotoUrl,
@@ -48,16 +49,18 @@ Clicking the extension now also starts a `MutationObserver` in the chat tab. Eac
 }
 ```
 
-Edit `performAction` in `scripts.js` to run browser-side bot behavior for each new item. The current default logs each item to the live chat tab console and dispatches a `yt-chat-obs:new-item` browser event.
+Edit `performAction` in `scripts.js` to run browser-side bot behavior for each new item. The current default dispatches a `yt-chat-obs:new-item` browser event and hides command messages that start with `!`.
 
 Existing visible messages are ignored when the watcher starts. Set `PROCESS_EXISTING_ON_START` to `true` in `scripts.js` if you want to process the currently visible chat backlog too.
 
 ## Optional Python watcher
 
-`youtube_chat_watcher.py` can read new chat items from an open Chrome tab and print them in a terminal. Start Chrome with a DevTools port first:
+`youtube_chat_watcher.py` can read new chat items from an open Chrome tab and run Python actions for them. It works by attaching to Chrome DevTools, injecting a `MutationObserver` into the YouTube chat tab, and receiving each parsed chat item through a browser binding.
+
+Start Chrome with a DevTools port first. Edit `VIDEO_CODE` in `start_chat.bat`, or run the same command manually:
 
 ```powershell
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --user-data-dir="C:\YoutubeChatOBSExtension" --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling --remote-debugging-port=9222 --user-data-dir="$env:TEMP\yt-chat-obs-debug" "https://www.youtube.com/live_chat?is_popout=1&v=VIDEO_CODE"
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="$env:TEMP\yt-chat-obs-debug" --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling "https://www.youtube.com/live_chat?is_popout=1&v=VIDEO_CODE"
 ```
 
 Then run:
@@ -68,7 +71,22 @@ python .\youtube_chat_watcher.py
 
 Add `--include-existing` if you also want to print the messages already visible when the watcher attaches.
 
-Put Python-side bot behavior in `handle_chat_item` inside `youtube_chat_watcher.py`.
+Put Python-side bot behavior in `handle_chat_item` inside `youtube_chat_watcher.py`, or add command handlers in `stream_commands.py`. Command handlers can accept `browser=None` to get a helper for interacting with the attached Chrome tab:
+
+```py
+def my_command(data, browser=None):
+    print(data["authorName"], data["message"])
+    if browser is not None:
+        browser.hide_chat_item(data)
+```
+
+Available browser helper methods:
+
+- `browser.evaluate(js)` runs JavaScript in the chat tab.
+- `browser.click(selector)` clicks the first matching element.
+- `browser.set_text(selector, text)` sets text/value and dispatches input/change events.
+- `browser.get_text(selector)` reads visible text from the first matching element.
+- `browser.hide_chat_item(data)` hides the chat item that triggered the command.
 
 The Python watcher can be started before Chrome is open. It waits for the DevTools port and live chat tab, and reconnects if Chrome or the tab is closed.
 Use `--retry-interval 2` to change the reconnect delay.
