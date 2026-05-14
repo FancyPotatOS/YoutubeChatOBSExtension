@@ -1,16 +1,23 @@
 """Command handlers used by youtube_chat_watcher.py."""
 
+def require_owner(data):
+    return data.get("owner", False)
 
 
 def test_command(data, browser=None):
+    if not require_owner(data):
+        return
     browser.evaluate(f"""console.log("{data.get('authorName') or '(unknown)'} sent the !test command. isOwner: {data.get('owner', False)}")""")
 
 
 def clear_command(data, browser=None):
+    if not require_owner(data):
+        return
+    
     if browser is None:
         print("Cannot clear chat item because no browser tab is attached")
         return
-
+    
     if browser.set_text("yt-live-chat-text-message-renderer", ""):
         print(f"Cleared command from {data.get('authorName') or '(unknown)'}")
     else:

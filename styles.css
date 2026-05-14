@@ -7,6 +7,19 @@
     display: none;
 }
 
+#img {
+    border-radius: 10000px;
+    border-style: solid;
+    border-width: 1px;
+    border-color: black;
+}
+
+#author-name.owner
+{
+    background-color: #2669d7 !important;
+}
+
+
 yt-live-chat-viewer-engagement-message-renderer.style-scope.yt-live-chat-item-list-renderer {
     display: none;
 }
@@ -71,4 +84,10 @@ span {
 #author-name {
     -webkit-text-stroke: 0.6px black;
     paint-order: stroke fill;
+}
+
+.ytSpecButtonShapeNextHost.ytSpecButtonShapeNextFilled.ytSpecButtonShapeNextMono.ytSpecButtonShapeNextSizeXs.ytSpecButtonShapeNextIconLeading.ytSpecButtonShapeNextEnableBackdropFilterExperiment {
+    border-style: solid;
+    border-width: 1px;
+    border-color: black;
 }
