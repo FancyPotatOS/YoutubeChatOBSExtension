@@ -29,4 +29,46 @@ There is now a simple design in the bottom left to use in OBS.
 
 All this extension does is apply some CSS to clean up the design, so it's nothing special. The sections in the greenscreen chat is scaled up, so you'll have to check it manually to crop it appropriately.
 
-The tab with Youtube chat must remain open and cannot be completely hidden by a maximized window. Otherwise it will not stay up-to-date.
+The tab with Youtube chat cannot be minimized, otherwise it will resize to 0x0 in OBS.
+
+## Watching new chat items
+
+Clicking the extension now also starts a `MutationObserver` in the chat tab. Each new chat item is parsed into:
+
+```js
+{
+  type,
+  id,
+  authorName,
+  authorPhotoUrl,
+  message,
+  timestamp,
+  rawText,
+  receivedAt
+}
+```
+
+Edit `performAction` in `scripts.js` to run browser-side bot behavior for each new item. The current default logs each item to the live chat tab console and dispatches a `yt-chat-obs:new-item` browser event.
+
+Existing visible messages are ignored when the watcher starts. Set `PROCESS_EXISTING_ON_START` to `true` in `scripts.js` if you want to process the currently visible chat backlog too.
+
+## Optional Python watcher
+
+`youtube_chat_watcher.py` can read new chat items from an open Chrome tab and print them in a terminal. Start Chrome with a DevTools port first:
+
+```powershell
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --user-data-dir="C:\YoutubeChatOBSExtension" --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling --remote-debugging-port=9222 --user-data-dir="$env:TEMP\yt-chat-obs-debug" "https://www.youtube.com/live_chat?is_popout=1&v=VIDEO_CODE"
+```
+
+Then run:
+
+```powershell
+python .\youtube_chat_watcher.py
+```
+
+Add `--include-existing` if you also want to print the messages already visible when the watcher attaches.
+
+Put Python-side bot behavior in `handle_chat_item` inside `youtube_chat_watcher.py`.
+
+The Python watcher can be started before Chrome is open. It waits for the DevTools port and live chat tab, and reconnects if Chrome or the tab is closed.
+Use `--retry-interval 2` to change the reconnect delay.
